@@ -20,14 +20,22 @@ import urllib2
 import urllib
 import json
 
+#appstoreid
+astrid_app_id = 453396855
+
+
 #flowdock parameters
+
+#debug test flow
+flowdock_post_url = 'https://api.flowdock.com/v1/messages/team_inbox/8a5495694140ca667b81c1906ef108d4'
+#flowdock_post_url = 'https://api.flowdock.com/v1/messages/team_inbox/a556125ef45f5abe2c023ef977f8148e'
+
 source = "iOS App Store" #an readable identifier of the application that uses the Flowdock API
-from_address = "andrew@astrid.com" #To show gravatar image, and email
-subject = "Daily iOS app store rankings" #Subject line
+from_address = "applereview@astrid.com" #To show gravatar image, and email
 tags = "#appstorerankings" #flowdock tags
 filename = "app_store_rankings.json" #save json to file, so we don't double post
 
-jsonObject
+jsonObject = {}
 
 
 appStores = {
@@ -144,7 +152,12 @@ def _getReviewsForPage(appStoreId, appId, pageNo):
             review["review"] = None
         else:
             review["review"] = review_node.text
-
+        title_node = node.find("{http://www.apple.com/itms/}HBoxView/{http://www.apple.com/itms/}TextView/{http://www.apple.com/itms/}SetFontStyle/{http://www.apple.com/itms/}b")
+        if title_node is None:
+            review["title"] = None
+        else:
+            review["title"] = title_node.text
+                
         version_node = node.find("{http://www.apple.com/itms/}HBoxView/{http://www.apple.com/itms/}TextView/{http://www.apple.com/itms/}SetFontStyle/{http://www.apple.com/itms/}GotoURL")
         if version_node is None:
             review["version"] = None
@@ -152,7 +165,7 @@ def _getReviewsForPage(appStoreId, appId, pageNo):
             review["version"] = re.search("Version [^\n^\ ]+", version_node.tail).group()
             review["url"] = version_node.get("url")
             review["date"] = re.search("Version .*(\n.*)+- \n(.*)", version_node.tail).group(2).strip()
-            review_date = datetime.strptime(review["date"], "%b %d, %Y").date()
+            review_date = _get_date_from_string(review["date"])
             if review_date != date.today():
                 break
         user_node = node.find("{http://www.apple.com/itms/}HBoxView/{http://www.apple.com/itms/}TextView/{http://www.apple.com/itms/}SetFontStyle/{http://www.apple.com/itms/}GotoURL/{http://www.apple.com/itms/}b")
@@ -178,33 +191,97 @@ def _getReviewsForPage(appStoreId, appId, pageNo):
         reviews.append(review)
     return reviews
 
+def _get_date_from_string(datestring):
+    response = datetime.today()
+    for format in [ "%b %d, %Y", "%b %d, %Y", "%d-%b-%Y"]:
+        try:
+            response = datetime.strptime(datestring, format)
+        except ValueError:
+            pass
+    return response.date()
+
+def _print_reviews(reviews, country):
+    ''' returns (reviews count, sum rank)
+        '''
+    response = "\n"
+    if len(reviews)>0:
+        response += "Reviews in %s:\n" % (country)
+        response += "\n"
+        sumRank = 0
+        for review in reviews:
+            if _contains_review(review):
+                break
+            
+            response += "%s by %s\n" % (review["version"], review["user"])
+            for i in range(review["rank"]):
+                response += ("*")
+            response += " (%s) %s\n" % (review["topic"], review["review"])
+            response += " Date: %s\n" % (review["date"])
+            response += " link - %s\n" % (review["url"])
+            response += "\n"
+            
+            
+            _post_to_flowdock(review)
+            
+            sumRank += review["rank"]
+        response += "Number of reviews in %s: %d, avg rank: %.2f\n\n" % (country, len(reviews), 1.0*sumRank/len(reviews))
+        print response
+        return (response, len(reviews), sumRank)
+    else:
+        return ("", 0, 0)
+
+
+#loading and saving reviews
+
 def _get_json_from_file():
-    f = open(filename, "r")
-    global jsonObject = json.loads(f.read())
+    global jsonObject
+    try:
+        with open(filename) as f: pass
+        f = open(filename, "r")
+        jsonObject = json.loads(f.read())
+    except IOError as e:
+        _save_json_to_file()
 
 def _save_json_to_file():
     f = open(filename, "w")
-    f.write(json.dumps(global jsonObject))
+    f.write(json.dumps(jsonObject))
     f.close()
 
-def _save_review(review):
-    
+def _add_review(review):
+    global jsonObject
+    if review["date"] in jsonObject:
+        reviews_today = jsonObject[review["date"]]
+        reviews_today[review["title"]] = _flowdock_review_content(review)
+    else:
+        jsonObject[review["date"]] = { review["title"] : _flowdock_review_content(review) }
+
 
 def _contains_review(review):
-    
+    global jsonObject
+    if not "date" in review:
+        return True
+    if review["date"] in jsonObject:
+        reviews_today = jsonObject[review["date"]]
+        if review["title"] in reviews_today:
+            return True
+    return False
+
+
+#flowdock methods
 
 def _post_to_flowdock(review):
-    url = 'https://api.flowdock.com/v1/messages/team_inbox/a556125ef45f5abe2c023ef977f8148e'
     stuff = urllib.urlencode(_flowdock_data(review))
-    return urllib2.urlopen(url, stuff)
+    response = urllib2.urlopen(flowdock_post_url, stuff)
+    _add_review(review)
+    return response
 
 def _flowdock_data(review):
     data = {}
-    data["source"] = "Steve Jobs"
-    data["from_address"] = "andrew@astrid.com"
-    data["subject"] = "Daily iOS app store rankings"
-    data["content"] = _flowdock_review_content(review)
-    data["tags"] = "#appstorerankings"
+    data["source"] = source
+    data["from_address"] = from_address
+    data["subject"] = review["title"]
+    data["content"] = _flowdock_review_content(review).encode('utf-8')
+    data["tags"] = tags
     data["link"] = review["url"]
     return data;
 
@@ -218,45 +295,17 @@ def _flowdock_review_content(review):
     response += " Country: %s\n" % (country)
     return response
 
-def _print_reviews(reviews, country):
-    ''' returns (reviews count, sum rank)
-    '''
-    response = "\n"
-    if len(reviews)>0:
-        response += "Reviews in %s:\n" % (country)
-        response += "\n"
-        sumRank = 0
-        for review in reviews:
-            response += "%s by %s\n" % (review["version"], review["user"])
-            for i in range(review["rank"]):
-                response += ("*")
-            response += " (%s) %s\n" % (review["topic"], review["review"])
-            response += " Date: %s\n" % (review["date"])
-        
-            response += " Country: %s\n" % (country)
-            _post_to_flowdock(review)
-        
-            response += " link - %s\n" % (review["url"])
-            response += "\n"
-            sumRank += review["rank"]
-        response += "Number of reviews in %s: %d, avg rank: %.2f\n\n" % (country, len(reviews), 1.0*sumRank/len(reviews))
-        print response
-        return (response, len(reviews), sumRank)
-    else:
-        return (0, 0)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='AppStoreReviewsScrapper command line.', epilog='To get your application Id look into the AppStore link to you app, for example http://itunes.apple.com/pl/app/autobuser-warszawa/id335042980?mt=8 - app Id is the number between "id" and "?mt=0"')
-    parser.add_argument('-i', '--id', default=0, metavar='AppId', type=int, help='Application Id (see below)')
+    parser.add_argument('-i', '--id', default=astrid_app_id, metavar='AppId', type=int, help='Application Id (see below)')
     parser.add_argument('-c', '--country', metavar='"Name"', type=str, default='all', help='AppStore country name (use -l to see them)')
     parser.add_argument('-l', '--list', action='store_true', default=False, help='AppStores list')
     args = parser.parse_args()
-    if args.id == 0:
-        parser.print_help()
-        raise SystemExit
     country = string.capwords(args.country)
     countries=appStores.keys()
     countries.sort()
+    _get_json_from_file()
     if args.list:
         for c in countries:
             print c
@@ -266,7 +315,6 @@ if __name__ == '__main__':
             for c in countries:
                 reviews = getReviews(appStores[c], args.id)
                 (string, rc,rs) = _print_reviews(reviews, c)
-                '''_post_to_flowdock(string)'''
                 rankCount += rc
                 rankSum += rs
             print "\nTotal number of reviews: %d, avg rank: %.2f" % (rankCount, 1.0 * rankSum/rankCount)
@@ -274,8 +322,8 @@ if __name__ == '__main__':
             try:
                 reviews = getReviews(appStores[country], args.id)
                 (string, rc, rs) = _print_reviews(reviews, country)
-                '''_post_to_flowdock(string)'''
             except KeyError:
                 print "No such country %s!\n\nWell, it could exist in real life, but I dont know it." % country
             pass
+    _save_json_to_file()
 
