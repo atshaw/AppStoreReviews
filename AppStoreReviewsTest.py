@@ -16,6 +16,19 @@ import string
 import argparse
 import re
 from datetime import datetime, date, time
+import urllib2
+import urllib
+import json
+
+#flowdock parameters
+source = "iOS App Store" #an readable identifier of the application that uses the Flowdock API
+from_address = "andrew@astrid.com" #To show gravatar image, and email
+subject = "Daily iOS app store rankings" #Subject line
+tags = "#appstorerankings" #flowdock tags
+filename = "app_store_rankings.json" #save json to file, so we don't double post
+
+jsonObject
+
 
 appStores = {
 'Argentina':          143505,
@@ -165,24 +178,70 @@ def _getReviewsForPage(appStoreId, appId, pageNo):
         reviews.append(review)
     return reviews
 
+def _get_json_from_file():
+    f = open(filename, "r")
+    global jsonObject = json.loads(f.read())
+
+def _save_json_to_file():
+    f = open(filename, "w")
+    f.write(json.dumps(global jsonObject))
+    f.close()
+
+def _save_review(review):
+    
+
+def _contains_review(review):
+    
+
+def _post_to_flowdock(review):
+    url = 'https://api.flowdock.com/v1/messages/team_inbox/a556125ef45f5abe2c023ef977f8148e'
+    stuff = urllib.urlencode(_flowdock_data(review))
+    return urllib2.urlopen(url, stuff)
+
+def _flowdock_data(review):
+    data = {}
+    data["source"] = "Steve Jobs"
+    data["from_address"] = "andrew@astrid.com"
+    data["subject"] = "Daily iOS app store rankings"
+    data["content"] = _flowdock_review_content(review)
+    data["tags"] = "#appstorerankings"
+    data["link"] = review["url"]
+    return data;
+
+def _flowdock_review_content(review):
+    response = "\n"
+    response += "%s by %s\n" % (review["version"], review["user"])
+    for i in range(review["rank"]):
+        response += ("*")
+    response += " (%s) %s\n" % (review["topic"], review["review"])
+    response += " Date: %s\n" % (review["date"])
+    response += " Country: %s\n" % (country)
+    return response
+
 def _print_reviews(reviews, country):
     ''' returns (reviews count, sum rank)
     '''
+    response = "\n"
     if len(reviews)>0:
-        print "Reviews in %s:" % (country)
-        print ""
+        response += "Reviews in %s:\n" % (country)
+        response += "\n"
         sumRank = 0
         for review in reviews:
-            print "%s by %s" % (review["version"], review["user"])
+            response += "%s by %s\n" % (review["version"], review["user"])
             for i in range(review["rank"]):
-                sys.stdout.write ("*") # to avoid space or newline after print
-            print " (%s) %s" % (review["topic"], review["review"])
-            print " date: %s" % (review["date"])
-            print " link - %s" % (review["url"])
-            print ""
+                response += ("*")
+            response += " (%s) %s\n" % (review["topic"], review["review"])
+            response += " Date: %s\n" % (review["date"])
+        
+            response += " Country: %s\n" % (country)
+            _post_to_flowdock(review)
+        
+            response += " link - %s\n" % (review["url"])
+            response += "\n"
             sumRank += review["rank"]
-        print "Number of reviews in %s: %d, avg rank: %.2f\n" % (country, len(reviews), 1.0*sumRank/len(reviews))
-        return (len(reviews), sumRank)
+        response += "Number of reviews in %s: %d, avg rank: %.2f\n\n" % (country, len(reviews), 1.0*sumRank/len(reviews))
+        print response
+        return (response, len(reviews), sumRank)
     else:
         return (0, 0)
 
@@ -206,14 +265,16 @@ if __name__ == '__main__':
             rankCount = 0; rankSum = 0
             for c in countries:
                 reviews = getReviews(appStores[c], args.id)
-                (rc,rs) = _print_reviews(reviews, c)
+                (string, rc,rs) = _print_reviews(reviews, c)
+                '''_post_to_flowdock(string)'''
                 rankCount += rc
                 rankSum += rs
             print "\nTotal number of reviews: %d, avg rank: %.2f" % (rankCount, 1.0 * rankSum/rankCount)
         else:
             try:
                 reviews = getReviews(appStores[country], args.id)
-                _print_reviews(reviews, country)
+                (string, rc, rs) = _print_reviews(reviews, country)
+                '''_post_to_flowdock(string)'''
             except KeyError:
                 print "No such country %s!\n\nWell, it could exist in real life, but I dont know it." % country
             pass
