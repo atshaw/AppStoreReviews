@@ -3,7 +3,7 @@
     version 2011-04-12
     Tomek "Grych" Gryszkiewicz, grych@tg.pl
     http://www.tg.pl
-    
+
     based on "Scraping AppStore Reviews" blog by Erica Sadun
      - http://blogs.oreilly.com/iphone/2008/08/scraping-appstore-reviews.html
     AppStore codes are based on "appstore_reviews" by Jeremy Wohl
@@ -15,6 +15,28 @@ import sys
 import string
 import argparse
 import re
+from datetime import datetime, date, time
+import urllib2
+import urllib
+import json
+
+#appstoreid
+astrid_app_id = 453396855
+
+
+#flowdock parameters
+
+#debug test flow
+#flowdock_post_url = 'https://api.flowdock.com/v1/messages/team_inbox/8a5495694140ca667b81c1906ef108d4'
+flowdock_post_url = 'https://api.flowdock.com/v1/messages/team_inbox/a556125ef45f5abe2c023ef977f8148e'
+
+source = "iOS App Store" #an readable identifier of the application that uses the Flowdock API
+from_address = "applereview@astrid.com" #To show gravatar image, and email
+tags = "#applestorerankings" #flowdock tags
+filename = "app_store_rankings.json" #save json to file, so we don't double post
+
+jsonObject = {}
+
 
 appStores = {
 'Argentina':          143505,
@@ -63,7 +85,7 @@ appStores = {
 'Romania':            143487,
 'Russia':             143469,
 'Saudi Arabia':       143479,
-'Schweiz/Suisse':     143459, 
+'Schweiz/Suisse':     143459,
 'Singapore':          143464,
 'Slovakia':           143496,
 'Slovenia':           143499,
@@ -88,9 +110,9 @@ appStores = {
 'Kazakhstan':         143517,
 'Latvia':             143519,
 'Lithuania':          143520,
-'Macau':              143515, 
+'Macau':              143515,
 'Malta':              143521,
-'Moldova':            143523,  
+'Moldova':            143523,
 'Nicaragua':          143512,
 'Paraguay':           143513,
 'Uruguay':            143514
@@ -98,11 +120,11 @@ appStores = {
 
 def getReviews(appStoreId, appId):
     ''' returns list of reviews for given AppStore ID and application Id
-        return list format: [{"topic": unicode string, "review": unicode string, "rank": int}]
-    ''' 
+        return list format: [{"title": unicode string, "review": unicode string, "rank": int}]
+    '''
     reviews=[]
     i=0
-    while True: 
+    while True:
         ret = _getReviewsForPage(appStoreId, appId, i)
         if len(ret)==0: # funny do while emulation ;)
             break
@@ -121,22 +143,31 @@ def _getReviewsForPage(appStoreId, appId, pageNo):
         print "Can't connect to the AppStore, please try again later."
         raise SystemExit
     root = ElementTree.parse(u).getroot()
+    '''print ElementTree.tostring(root)'''
     reviews=[]
     for node in root.findall('{http://www.apple.com/itms/}View/{http://www.apple.com/itms/}ScrollView/{http://www.apple.com/itms/}VBoxView/{http://www.apple.com/itms/}View/{http://www.apple.com/itms/}MatrixView/{http://www.apple.com/itms/}VBoxView/{http://www.apple.com/itms/}VBoxView/{http://www.apple.com/itms/}VBoxView/'):
         review = {}
-
         review_node = node.find("{http://www.apple.com/itms/}TextView/{http://www.apple.com/itms/}SetFontStyle")
         if review_node is None:
             review["review"] = None
         else:
             review["review"] = review_node.text
-
+        title_node = node.find("{http://www.apple.com/itms/}HBoxView/{http://www.apple.com/itms/}TextView/{http://www.apple.com/itms/}SetFontStyle/{http://www.apple.com/itms/}b")
+        if title_node is None:
+            review["title"] = None
+        else:
+            review["title"] = title_node.text
+                
         version_node = node.find("{http://www.apple.com/itms/}HBoxView/{http://www.apple.com/itms/}TextView/{http://www.apple.com/itms/}SetFontStyle/{http://www.apple.com/itms/}GotoURL")
         if version_node is None:
             review["version"] = None
         else:
             review["version"] = re.search("Version [^\n^\ ]+", version_node.tail).group()
-    
+            review["url"] = version_node.get("url")
+            review["date"] = re.search("Version .*(\n.*)+- \n(.*)", version_node.tail).group(2).strip()
+            review_date = _get_date_from_string(review["date"])
+            if review_date != date.today():
+                break
         user_node = node.find("{http://www.apple.com/itms/}HBoxView/{http://www.apple.com/itms/}TextView/{http://www.apple.com/itms/}SetFontStyle/{http://www.apple.com/itms/}GotoURL/{http://www.apple.com/itms/}b")
         if user_node is None:
             review["user"] = None
@@ -151,46 +182,126 @@ def _getReviewsForPage(appStoreId, appId, pageNo):
         except KeyError:
             review["rank"] = None
 
-        topic_node = node.find("{http://www.apple.com/itms/}HBoxView/{http://www.apple.com/itms/}TextView/{http://www.apple.com/itms/}SetFontStyle/{http://www.apple.com/itms/}b")
-        if topic_node is None:
-            review["topic"] = None
-        else:
-            review["topic"] = topic_node.text
-
         reviews.append(review)
     return reviews
-    
+
+def _get_date_from_string(datestring):
+    response = datetime.today()
+    for format in [ "%b %d, %Y", "%b %d, %Y", "%d-%b-%Y"]:
+        try:
+            response = datetime.strptime(datestring, format)
+        except ValueError:
+            pass
+    return response.date()
+
 def _print_reviews(reviews, country):
     ''' returns (reviews count, sum rank)
-    '''
+        '''
+    response = "\n"
     if len(reviews)>0:
-        print "Reviews in %s:" % (country)
-        print ""
+        response += "Reviews in %s:\n" % (country)
+        response += "\n"
         sumRank = 0
         for review in reviews:
-            print "%s by %s" % (review["version"], review["user"])
+            if _contains_review(review):
+                break
+            
+            response += "%s by %s\n" % (review["version"], review["user"])
             for i in range(review["rank"]):
-                sys.stdout.write ("*") # to avoid space or newline after print
-            print " (%s) %s" % (review["topic"], review["review"])
-            print ""
+                response += ("*")
+            response += " (%s) %s\n" % (review["title"], review["review"])
+            response += " Date: %s\n" % (review["date"])
+            response += " link - %s\n" % (review["url"])
+            response += "\n"
+            
+            
+            _post_to_flowdock(review, country)
+            
             sumRank += review["rank"]
-        print "Number of reviews in %s: %d, avg rank: %.2f\n" % (country, len(reviews), 1.0*sumRank/len(reviews))
-        return (len(reviews), sumRank)
+        response += "Number of reviews in %s: %d, avg rank: %.2f\n\n" % (country, len(reviews), 1.0*sumRank/len(reviews))
+        print response
+        return (response, len(reviews), sumRank)
     else:
-        return (0, 0)
+        return ("", 0, 0)
+
+
+#loading and saving reviews
+
+def _get_json_from_file():
+    global jsonObject
+    try:
+        with open(filename) as f: pass
+        f = open(filename, "r")
+        jsonObject = json.loads(f.read())
+    except IOError as e:
+        _save_json_to_file()
+
+def _save_json_to_file():
+    f = open(filename, "w")
+    f.write(json.dumps(jsonObject))
+    f.close()
+
+def _add_review(review):
+    global jsonObject
+    if review["date"] in jsonObject:
+        reviews_today = jsonObject[review["date"]]
+        reviews_today[review["title"]] = _flowdock_review_content(review)
+    else:
+        jsonObject[review["date"]] = { review["title"] : _flowdock_review_content(review) }
+
+
+def _contains_review(review):
+    global jsonObject
+    if not "date" in review:
+        return True
+    if review["date"] in jsonObject:
+        reviews_today = jsonObject[review["date"]]
+        if review["title"] in reviews_today:
+            return True
+    return False
+
+
+#flowdock methods
+
+def _post_to_flowdock(review, country):
+    review["country"] = country
+    
+    stuff = urllib.urlencode(_flowdock_data(review))
+    response = urllib2.urlopen(flowdock_post_url, stuff)
+    _add_review(review)
+    return response
+
+def _flowdock_data(review):
+    data = {}
+    data["source"] = source
+    data["from_address"] = from_address
+    data["subject"] = review["title"]
+    data["content"] = _flowdock_review_content(review).encode('utf-8')
+    data["tags"] = tags
+    data["link"] = review["url"]
+    return data;
+
+def _flowdock_review_content(review):
+    response = "\n"
+    for i in range(review["rank"]):
+        response += ("*")
+    response += " %s\n" % (review["review"])
+    response += "by %s\n" % (review["user"])
+    response += "%s  On %s\n" % (review["version"], review["date"])
+    response += " from: %s\n" % (review["country"])
+    return response
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='AppStoreReviewsScrapper command line.', epilog='To get your application Id look into the AppStore link to you app, for example http://itunes.apple.com/pl/app/autobuser-warszawa/id335042980?mt=8 - app Id is the number between "id" and "?mt=0"')
-    parser.add_argument('-i', '--id', default=0, metavar='AppId', type=int, help='Application Id (see below)')
+    parser.add_argument('-i', '--id', default=astrid_app_id, metavar='AppId', type=int, help='Application Id (see below)')
     parser.add_argument('-c', '--country', metavar='"Name"', type=str, default='all', help='AppStore country name (use -l to see them)')
     parser.add_argument('-l', '--list', action='store_true', default=False, help='AppStores list')
     args = parser.parse_args()
-    if args.id == 0:
-        parser.print_help()
-        raise SystemExit
     country = string.capwords(args.country)
     countries=appStores.keys()
     countries.sort()
+    _get_json_from_file()
     if args.list:
         for c in countries:
             print c
@@ -199,15 +310,16 @@ if __name__ == '__main__':
             rankCount = 0; rankSum = 0
             for c in countries:
                 reviews = getReviews(appStores[c], args.id)
-                (rc,rs) = _print_reviews(reviews, c)
+                (string, rc,rs) = _print_reviews(reviews, c)
                 rankCount += rc
                 rankSum += rs
             print "\nTotal number of reviews: %d, avg rank: %.2f" % (rankCount, 1.0 * rankSum/rankCount)
         else:
             try:
                 reviews = getReviews(appStores[country], args.id)
-                _print_reviews(reviews, country)
+                (string, rc, rs) = _print_reviews(reviews, country)
             except KeyError:
                 print "No such country %s!\n\nWell, it could exist in real life, but I dont know it." % country
             pass
-        
+    _save_json_to_file()
+
