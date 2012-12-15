@@ -19,6 +19,7 @@ from datetime import datetime, date, time
 import urllib2
 import urllib
 import json
+import os
 
 #appstoreid
 astrid_app_id = 453396855
@@ -28,12 +29,13 @@ astrid_app_id = 453396855
 
 #debug test flow
 #flowdock_post_url = 'https://api.flowdock.com/v1/messages/team_inbox/8a5495694140ca667b81c1906ef108d4'
+#main flow
 flowdock_post_url = 'https://api.flowdock.com/v1/messages/team_inbox/a556125ef45f5abe2c023ef977f8148e'
 
 source = "iOS App Store" #an readable identifier of the application that uses the Flowdock API
 from_address = "applereview@astrid.com" #To show gravatar image, and email
 tags = "#applestorerankings" #flowdock tags
-filename = "app_store_rankings.json" #save json to file, so we don't double post
+filename = os.path.join(os.path.dirname(__file__), "app_store_rankings.json") #save json to file, so we don't double post
 
 jsonObject = {}
 
@@ -209,6 +211,7 @@ def _print_reviews(reviews, country):
             response += "%s by %s\n" % (review["version"], review["user"])
             for i in range(review["rank"]):
                 response += ("*")
+            response += "(%d Stars)" % review["rank"]
             response += " (%s) %s\n" % (review["title"], review["review"])
             response += " Date: %s\n" % (review["date"])
             response += " link - %s\n" % (review["url"])
@@ -275,7 +278,7 @@ def _flowdock_data(review):
     data = {}
     data["source"] = source
     data["from_address"] = from_address
-    data["subject"] = review["title"]
+    data["subject"] = review["title"].encode('utf-8')
     data["content"] = _flowdock_review_content(review).encode('utf-8')
     data["tags"] = tags
     data["link"] = review["url"]
