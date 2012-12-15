@@ -211,7 +211,6 @@ def _print_reviews(reviews, country):
             response += "%s by %s\n" % (review["version"], review["user"])
             for i in range(review["rank"]):
                 response += ("*")
-            response += "(%d Stars)" % review["rank"]
             response += " (%s) %s\n" % (review["title"], review["review"])
             response += " Date: %s\n" % (review["date"])
             response += " link - %s\n" % (review["url"])
@@ -288,6 +287,7 @@ def _flowdock_review_content(review):
     response = "\n"
     for i in range(review["rank"]):
         response += ("*")
+    response += "(%d Stars)" % review["rank"]
     response += " %s\n" % (review["review"])
     response += "by %s\n" % (review["user"])
     response += "%s  On %s\n" % (review["version"], review["date"])
