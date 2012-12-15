@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# coding: utf-8
 ''' Apple AppStore reviews scrapper
     version 2011-04-12
     Tomek "Grych" Gryszkiewicz, grych@tg.pl
@@ -20,6 +21,7 @@ import urllib2
 import urllib
 import json
 import os
+
 
 #appstoreid
 astrid_app_id = 453396855
@@ -209,8 +211,7 @@ def _print_reviews(reviews, country):
                 break
             
             response += "%s by %s\n" % (review["version"], review["user"])
-            for i in range(review["rank"]):
-                response += ("*")
+            response += _ranking_stars(review, "*")
             response += " (%s) %s\n" % (review["title"], review["review"])
             response += " Date: %s\n" % (review["date"])
             response += " link - %s\n" % (review["url"])
@@ -221,7 +222,7 @@ def _print_reviews(reviews, country):
             
             sumRank += review["rank"]
         response += "Number of reviews in %s: %d, avg rank: %.2f\n\n" % (country, len(reviews), 1.0*sumRank/len(reviews))
-        print response
+        print response.encode('utf-8')
         return (response, len(reviews), sumRank)
     else:
         return ("", 0, 0)
@@ -276,24 +277,29 @@ def _post_to_flowdock(review, country):
 def _flowdock_data(review):
     data = {}
     data["source"] = source
-    data["from_address"] = from_address
+    data["from_address"] = "%s <%s>" % (_ranking_stars(review), from_address)
     data["subject"] = review["title"].encode('utf-8')
-    data["content"] = _flowdock_review_content(review).encode('utf-8')
+    data["content"] = _flowdock_review_content(review, False).encode('utf-8')
     data["tags"] = tags
     data["link"] = review["url"]
     return data;
 
-def _flowdock_review_content(review):
+def _flowdock_review_content(review, show_ranking=True):
     response = "\n"
-    for i in range(review["rank"]):
-        response += ("*")
-    response += "(%d Stars)" % review["rank"]
+    if show_ranking:
+        response += _ranking_stars(review, "*")
+        response += "(%d Stars)" % review["rank"]
     response += " %s\n" % (review["review"])
     response += "by %s\n" % (review["user"])
     response += "%s  On %s\n" % (review["version"], review["date"])
     response += " from: %s\n" % (review["country"])
     return response
 
+def _ranking_stars(review, star_char="★"):
+    response = ""
+    for i in range(review["rank"]):
+        response += star_char
+    return response
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='AppStoreReviewsScrapper command line.', epilog='To get your application Id look into the AppStore link to you app, for example http://itunes.apple.com/pl/app/autobuser-warszawa/id335042980?mt=8 - app Id is the number between "id" and "?mt=0"')
